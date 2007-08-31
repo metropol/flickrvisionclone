@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Module>
+<ModulePrefs title="Flickrvision clone" description="Using the Flickr API, recently taken and geotagged images are fetched from Flickr and displayed for a short interval on the map, one by one. This mapplet tries to reproduce the experience of watching the popular flickrvision by David Troy." author="Ugo Di Profio" author_email="gmetropol+mapplet@gmail.com" screenshot="http://farm2.static.flickr.com/1295/537019113_edb9f1194e_o_d.jpg" thumbnail="http://farm2.static.flickr.com/1325/536905798_b32059a22f_o_d.jpg" height="300">
+  <Require feature="sharedmap"/>
+</ModulePrefs>
+<Content type="html"><![CDATA[
+
+<small>
+<h3>Flickrvision Clone</h3><br>
+Using the <a href="http://www.flickr.com/services/api/">Flickr API</a>, recently taken and geotagged images are fetched from Flickr and displayed for a short interval on the map, one by one. This mapplet tries to reproduce the experience of watching the popular <a href="http://flickrvision.com/">flickrvision</a> by David Troy.
+</small>
+
+<script>
+var map = new GMap2();
+
+// world view
+map.setCenter(new GLatLng(0,0), 3);   
+
+var current = 0; // the photo item to process
+var per_page = 100; // how many pictures per page to retrieve
+var phototime = 7; // every how many seconds a photo is processed
+var skipdelay = 0.050; // timeout to skip to next photo in batch when the current is not usable
+var photos; // the array of photos waiting to be processed.
+var marker; // the marker for the current photo
+var totalPages = 0; // number of pages returned from last fetch
+var lastPage = 1; // last fetched page
+var lastLocation; // coordinates of the last displayed photo
+var lastUser; // user id of the last displayed photo
+
+// "tiny" marker icon
+var tinyIcon = new GIcon();
+tinyIcon.image = "http://labs.google.com/ridefinder/images/mm_20_red.png";
+tinyIcon.shadow = "http://labs.google.com/ridefinder/images/mm_20_shadow.png";
+tinyIcon.iconSize = new GSize(12, 20);
+tinyIcon.shadowSize = new GSize(22, 20);
+tinyIcon.iconAnchor = new GPoint(6, 20);
+tinyIcon.infoWindowAnchor = new GPoint(5, 1);
+
+var baseurl = buildURL();
+
+// fetch the first batch of photos from Flickr
+FetchPhotos();
+
+//
+// THE END
+//
+
+//
+// Builds the url to use when calling Flickr service
+//
+function buildURL() {
+  var url =   "http://api.flickr.com/services/rest/?method=flickr.photos.search&api_key=fcf44e052143fa4c7a8a5d91c0fffc58&tags=geotagged&accuracy=1&extras=geo,date_taken,last_update,owner_name&per_page=" +per_page+  "&sort=date-posted-desc"+
+"&min_taken_date=" + getDateNow();
+  return url;
+}
+
+//
+// Fetch a batch of photos from flickr using the API call
+//
+function FetchPhotos() {
+  var url = baseurl + "&page=" + lastPage;
+  _IG_FetchXmlContent(url, callFlickrAPI );
+}
+
+//
+// Fetch the actual feed from Flick using the API
+//
+function callFlickrAPI(response) {
+  var res =  response.getElementsByTagName("photos").item(0);
+  var total = res.getAttribute("total");
+  var perpage = res.getAttribute("perpage");
+  totalPages = res.getAttribute("pages");
+  delete photos; // release resources allocated for previous batch (is this right?)
+  photos = response.getElementsByTagName("photo");
+  ProcessPhoto();  // start processing
+}
+
+//
+// Process the current photo item
+//
+function ProcessPhoto() {
+  var timeout = phototime;
+  var photo = photos.item( current );
+  if ( displayCriteriaMet( photo ) ) { // display photos on certain conditions only
+    clearMap( marker );     // remove previous marker
+    marker = createPhotoMarker( photo );     // and prepare the next
+  }
+  else {
+    timeout = skipdelay; 
+  }
+  current++;
+
+  if ( current < photos.length ) {
+    // it there are items left, set timeout to process the next.
+    window.setTimeout( ProcessPhoto, timeout*1000);
+  }
+  else {
+    // no items left: reset status and get a new batch
+    current = 0;
+    if ( lastPage == totalPages) {
+      baseurl = buildURL(); // processed all pages from last batch. need to get a new one.
+      lastPage=1;
+    }
+    else {  
+      lastPage++;
+    }
+    window.setTimeout( FetchPhotos, timeout*1000);
+  }
+}
+
+
+//
+// Check if required conditions for display are met
+//
+function displayCriteriaMet( photo ) {   // check geodata
+  if ( photo.getAttribute("accuracy") == 0 ) {
+    return false;
+  }
+  if ( lastUser == photo.getAttribute("owner") ) {   // avoid repetition of last user
+     return false;
+  }
+  var lat  = photo.getAttribute("latitude");
+  var lng  = photo.getAttribute("longitude");
+  var latlng = new GLatLng(lat, lng);
+  if ( lastLocation == latlng ) {   // avoid repetition on same location
+     return false;
+  }
+  return true; // good to go
+}
+
+//
+// Close info window and remove marker
+//
+function clearMap( marker ) {
+  map.closeInfoWindow();
+  map.removeOverlay( marker );
+  delete marker;
+}
+
+
+// return current date and time in a format accepted by the Flickr API i.e. in MySQL 'datetime' format.
+function getDateNow() {
+  var d = new Date();
+  var month=d.getMonth() + 1;
+  var year=d.getFullYear();
+  return year+"-"+month;
+}
+
+//
+// Creates HTML for the marker for the photo
+//
+function createPhotoMarker(photo) {
+  var lat  = photo.getAttribute("latitude");
+  var lng  = photo.getAttribute("longitude");
+  var latlng = new GLatLng(lat, lng);
+  var title = photo.getAttribute("title");
+  var farm = photo.getAttribute("farm");
+  var server = photo.getAttribute("server");
+  var secret = photo.getAttribute("secret");
+  var id = photo.getAttribute("id");
+  var ownername = photo.getAttribute("ownername");
+  var lastupdate = photo.getAttribute("lastupdate");
+  var html = '<div style="width:240px; font-size:12px;">'+
+    '<b>'+title+'</b></br>'+
+    '<img src="http://farm'+farm+'.static.flickr.com/'+server+'/'+id+'_'+secret+'_m.jpg"  alt="'+title+'" /></br>'+
+    'posted by <i><b>' +ownername+ '</b></i><br/>'+
+    '<a href="http://www.flickr.com/photo.gne?id=' +id+ '"  target="_blank">view on Flickr</a>'+
+    '</div>';
+  var marker = new GMarker(latlng, {icon:tinyIcon} );
+  map.addOverlay(marker);
+  marker.openInfoWindowHtml( html, {disableGoogleLinks:true} );
+ 
+  // remember to limit repetitions
+  lastLocation = latlng;
+  lastUser = photo.getAttribute("owner");
+
+  return marker;
+}
+
+</script>
+
+]]></Content>
+</Module>
+
